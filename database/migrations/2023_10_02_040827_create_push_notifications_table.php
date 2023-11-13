@@ -15,6 +15,8 @@ return new class extends Migration
             $table->integer('failure'); 
             $table->unsignedSmallInteger('canonical_ids');
             $table->string('message_id');
+            $table->text('device_token')->nullable();
+            $table->integer('product_id');
             $table->timestamps();
         });
     }

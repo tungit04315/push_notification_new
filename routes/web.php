@@ -34,6 +34,8 @@ $router->put('/update-product', 'App\Http\Controllers\NotificationSendController
 $router->delete('/delete-product', 'App\Http\Controllers\NotificationSendController@deleteSoft');
 $router->post('/restore-product', 'App\Http\Controllers\NotificationSendController@restore');
 
+$router->get('/index', 'App\Http\Controllers\NotificationSendController@indexHomePage');
+
 //user
 $router->put('/update-user', 'App\Http\Controllers\NotificationSendController@UpdateUser');
 
@@ -45,4 +47,7 @@ $router->post('/contact', ['uses' => 'ContactController@sendWebNotification']);
 $router->post('/store-token', 'App\Http\Controllers\NotificationSendController@updateDeviceToken')->name('store.token');
 
 $router->post('/send-web-notification', 'App\Http\Controllers\NotificationSendController@sendNotification')->name('send.web-notification');
+$router->get('/send-notification/{product_id}', 'App\Http\Controllers\NotificationSendController@sendNotificationProductId')->name('send-notification');
+$router->post('/logout', 'App\Http\Controllers\NotificationSendController@logout')->name('logout');
+
 // });

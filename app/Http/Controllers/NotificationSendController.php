@@ -11,6 +11,7 @@ use Illuminate\Support\Facades\Mail;
 
 class NotificationSendController extends Controller
 {
+    
     public function updateDeviceToken(Request $request)
     {
         Auth::user()->device_token = $request->token;
@@ -79,7 +80,7 @@ class NotificationSendController extends Controller
         }
 
         //return dd($result);
-        return view('home');
+        return view('index');
     }
     
     public function saveProduct(Request $require)
@@ -123,7 +124,98 @@ class NotificationSendController extends Controller
         $pushNotification->canonical_ids = $result['canonical_ids'];
         $pushNotification->message_id = $result['results'][0]['message_id'];
 
+
         $pushNotification->save();
+    }
+
+    public function savePushNotificationProductId($result, $device_token, $product_id)
+    {
+        $pushNotification = new PushNotification();
+
+        $pushNotification->multicast_id = $result['multicast_id'];
+        $pushNotification->success = $result['success'];
+        $pushNotification->failure = $result['failure'];
+        $pushNotification->canonical_ids = $result['canonical_ids'];
+        $pushNotification->message_id = $result['results'][0]['message_id'];
+        $pushNotification->device_token = $device_token;
+        $pushNotification->product_id = $product_id;
+
+        $pushNotification->save();
+    }
+
+    public function sendNotificationProductId(Request $request, $product_id)
+    {
+        $product = Product::find($product_id);
+        if (!$product) {
+            return back()->with('error', 'Sản phẩm không tồn tại.');
+        }
+
+        $url = 'https://fcm.googleapis.com/fcm/send';
+
+        $FcmToken = User::whereNotNull('device_token')->pluck('device_token')->all();
+
+        $serverKey = 'AAAAiEIvS38:APA91bG698tMOSMYlzfwnJxTcYfau3wLfOLpQkd41kgs8UQXhTtzG99fC5dSKHqeXIIRjrGj5-rFiqJJoK3QlfkM0kI9He5xmwESHhMXiYwsk0DWxtIs68AqfXSlUYIKw68j_U-BA74X'; 
+
+        foreach ($FcmToken as $deviceToken) {
+            if (!PushNotification::where('device_token', $deviceToken)->where('product_id', $product_id)->exists()) 
+            {
+                $data = [
+                    "registration_ids" => [$deviceToken],
+                    "notification" => [
+                        "title" => $product->name,
+                        "body" => $product->description,
+                        "price" => $product->price,
+                        "image" => $request->image,
+                        "icon" => $request->icon,
+                    ],
+                ];
+                $encodedData = json_encode($data);
+        
+                $headers = [
+                    'Authorization:key=' . $serverKey,
+                    'Content-Type: application/json',
+                ];
+        
+                $ch = curl_init();
+        
+                curl_setopt($ch, CURLOPT_URL, $url);
+                curl_setopt($ch, CURLOPT_POST, true);
+                curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
+                curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+                curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, 0);
+                curl_setopt($ch, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_1_1);
+        
+                curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+                curl_setopt($ch, CURLOPT_POSTFIELDS, $encodedData);
+        
+                $result = curl_exec($ch);
+        
+                if ($result === false) {
+                    die('Curl failed: ' . curl_error($ch));
+                }
+        
+                curl_close($ch);
+        
+                $result = json_decode($result, true);
+        
+                if (json_last_error() !== JSON_ERROR_NONE) {
+                    error_log('JSON decoding error: ' . json_last_error_msg());
+                } else {
+        
+                    //$this->saveProduct($request);
+        
+                    $this->savePushNotificationProductId($result, $deviceToken, $product_id);
+        
+                    error_log(json_encode($result));
+                }
+    
+            }else{
+                $notificationSent = true;
+            }
+            
+        }
+       
+        return redirect('/index')->with('notificationSent', $notificationSent);  
     }
 
     public function Save(Request $require)
@@ -251,6 +343,51 @@ class NotificationSendController extends Controller
         return response()->json($product);
     }
 
+    public function indexHomePage(Request $request)
+    {
+        if (!Auth::check()) {
+            return redirect()->route('login'); // Chuyển hướng đến trang đăng nhập nếu chưa đăng nhập
+        }
+        $notificationSent = $request->session()->get('notificationSent', false);
+        $products = Product::all();
+        $perPage = $request->input('per_page', 5);
+        $products = Product::paginate($perPage);
+        $query = Product::query();
+
+        if ($request->has('name')) {
+            $query->where('name', $request->input('name'));
+        }
+
+        if ($request->has('price')) {
+            $priceFilter = $request->input('price');
+            switch ($priceFilter) {
+                case 'highest':
+                    $query->orderBy('price', 'desc');
+                    break;
+                case 'lowest':
+                    $query->orderBy('price', 'asc');
+                    break;
+            }
+        }
+
+        // if ($request->has('newest')) {
+        //     $query->orderBy('created_at', 'desc');
+        // }
+
+        // if ($request->has('oldest')) {
+        //     $query->orderBy('created_at', 'asc');
+        // }
+
+        $product = $query->paginate($perPage);
+        if ($notificationSent) {
+            echo '<script type="text/javascript">
+            alert("Sản Phẩm Đã Được Gửi Thông Báo!");
+            </script>';
+        }
+        
+        return view('index', compact('products'));
+    }
+
     public function UpdateUser(Request $request)
     {
         $id = $request->input('id');
@@ -286,5 +423,13 @@ class NotificationSendController extends Controller
             $user->save();
             return response()->json(['message' => 'Cập nhật thành công'], 200);
         }
+    }
+
+    public function logout(Request $request)
+    {
+        Auth::logout(); 
+        // $request->session()->invalidate(); 
+        // $request->session()->regenerateToken(); 
+        return redirect('/index'); 
     }
 }
