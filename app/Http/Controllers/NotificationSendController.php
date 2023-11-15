@@ -8,10 +8,12 @@ use App\Models\User;
 use Auth;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Mail;
+use Monolog\Handler\StreamHandler;
+use Monolog\Logger;
 
 class NotificationSendController extends Controller
 {
-    
+
     public function updateDeviceToken(Request $request)
     {
         Auth::user()->device_token = $request->token;
@@ -82,7 +84,7 @@ class NotificationSendController extends Controller
         //return dd($result);
         return view('index');
     }
-    
+
     public function saveProduct(Request $require)
     {
 
@@ -97,21 +99,7 @@ class NotificationSendController extends Controller
         $product->description = $require->description;
         $product->price = $require->price;
         $product->save();
-       
-        $users = User::all();
-        foreach ($users as $user) {
-            $data = [
-                'name' => $user->name,
-                'product' => $require->input('name'),
-                "description" => $require->input('description'),
-                "price" => $require->input('price'),
-            ];
 
-            Mail::send("mail", $data, function ($message) use ($user) {
-                $message->to($user->email)->subject("Thông báo: Shopee ra mắt sản phẩm mới.");
-                //$this->info("Send Email Successfully");
-            });
-        } 
     }
 
     public function savePushNotification($result)
@@ -124,10 +112,23 @@ class NotificationSendController extends Controller
         $pushNotification->canonical_ids = $result['canonical_ids'];
         $pushNotification->message_id = $result['results'][0]['message_id'];
 
-
         $pushNotification->save();
     }
-
+    public function updatePushNotificationProductId($result, $device_token, $product_id)
+    {
+        $pushNotification = PushNotification::where('device_token', $device_token)->where('product_id', $product_id)->first();
+        if ($pushNotification) {
+            $pushNotification->update([
+                'multicast_id' => $result['multicast_id'],
+                'success' => $result['success'],
+                'failure' => $result['failure'],
+                'canonical_ids' => $result['canonical_ids'],
+                'message_id' => $result['results'][0]['message_id'],
+            ]);
+        } else {
+            // Handle case where push notification record is not found
+        }
+    }
     public function savePushNotificationProductId($result, $device_token, $product_id)
     {
         $pushNotification = new PushNotification();
@@ -144,78 +145,101 @@ class NotificationSendController extends Controller
     }
 
     public function sendNotificationProductId(Request $request, $product_id)
-    {
+    {$log = new Logger('SendNotification');
+        $log->pushHandler(new StreamHandler('logs/SendNotification.log', Logger::DEBUG));
+
         $product = Product::find($product_id);
         if (!$product) {
             return back()->with('error', 'Sản phẩm không tồn tại.');
         }
 
         $url = 'https://fcm.googleapis.com/fcm/send';
-
         $FcmToken = User::whereNotNull('device_token')->pluck('device_token')->all();
 
-        $serverKey = 'AAAAiEIvS38:APA91bG698tMOSMYlzfwnJxTcYfau3wLfOLpQkd41kgs8UQXhTtzG99fC5dSKHqeXIIRjrGj5-rFiqJJoK3QlfkM0kI9He5xmwESHhMXiYwsk0DWxtIs68AqfXSlUYIKw68j_U-BA74X'; 
+        $user = Auth::user();
+        if ($user->device_token == null) {
+            $log->error('Gửi thất bại do tài khoản không được cấp quyền !');
+            return redirect('/index');
+        } else {
+            $serverKey = 'AAAAiEIvS38:APA91bG698tMOSMYlzfwnJxTcYfau3wLfOLpQkd41kgs8UQXhTtzG99fC5dSKHqeXIIRjrGj5-rFiqJJoK3QlfkM0kI9He5xmwESHhMXiYwsk0DWxtIs68AqfXSlUYIKw68j_U-BA74X';
+            $notificationSent = false;
+            foreach ($FcmToken as $deviceToken) {
+                if (!PushNotification::where('device_token', $deviceToken)->where('product_id', $product_id)->exists()) {
+                    $data = [
+                        "registration_ids" => [$deviceToken],
+                        "notification" => [
+                            "title" => $product->name,
+                            "body" => $product->description,
+                            "price" => $product->price,
+                            "image" => $request->image,
+                            "icon" => $request->icon,
+                        ],
+                    ];
 
-        foreach ($FcmToken as $deviceToken) {
-            if (!PushNotification::where('device_token', $deviceToken)->where('product_id', $product_id)->exists()) 
-            {
-                $data = [
-                    "registration_ids" => [$deviceToken],
-                    "notification" => [
-                        "title" => $product->name,
-                        "body" => $product->description,
-                        "price" => $product->price,
-                        "image" => $request->image,
-                        "icon" => $request->icon,
-                    ],
-                ];
-                $encodedData = json_encode($data);
-        
-                $headers = [
-                    'Authorization:key=' . $serverKey,
-                    'Content-Type: application/json',
-                ];
-        
-                $ch = curl_init();
-        
-                curl_setopt($ch, CURLOPT_URL, $url);
-                curl_setopt($ch, CURLOPT_POST, true);
-                curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
-                curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-                curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, 0);
-                curl_setopt($ch, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_1_1);
-        
-                curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
-                curl_setopt($ch, CURLOPT_POSTFIELDS, $encodedData);
-        
-                $result = curl_exec($ch);
-        
-                if ($result === false) {
-                    die('Curl failed: ' . curl_error($ch));
-                }
-        
-                curl_close($ch);
-        
-                $result = json_decode($result, true);
-        
-                if (json_last_error() !== JSON_ERROR_NONE) {
-                    error_log('JSON decoding error: ' . json_last_error_msg());
+                    $encodedData = json_encode($data);
+
+                    $headers = [
+                        'Authorization:key=' . $serverKey,
+                        'Content-Type: application/json',
+                    ];
+
+                    $ch = curl_init();
+
+                    curl_setopt($ch, CURLOPT_URL, $url);
+                    curl_setopt($ch, CURLOPT_POST, true);
+                    curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
+                    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+                    curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, 0);
+                    curl_setopt($ch, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_1_1);
+
+                    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+                    curl_setopt($ch, CURLOPT_POSTFIELDS, $encodedData);
+
+                    $result = curl_exec($ch);
+
+                    if ($result === false) {
+                        die('Curl failed: ' . curl_error($ch));
+                        $log->error('Gửi thông báo thất bại');
+                        return redirect('/index');
+                    } else {
+                        $log->info('Gửi thông báo thành công !');
+                    }
+
+                    curl_close($ch);
+
+                    $result = json_decode($result, true);
+
+                    if (json_last_error() !== JSON_ERROR_NONE) {
+                        error_log('JSON decoding error: ' . json_last_error_msg());
+                    } else {
+
+                        //$this->saveProduct($request);
+
+                        $this->savePushNotificationProductId($result, $deviceToken, $product_id);
+
+                        $users = User::all();
+                        foreach ($users as $user) {
+                            $data = [
+                                'name' => $user->name,
+                                'product' => $product->name,
+                                "description" => $product->description,
+                                "price" => $product->price,
+                            ];
+
+                            Mail::send("mail", $data, function ($message) use ($user) {
+                                $message->to($user->email)->subject("Thông báo: Shopee ra mắt sản phẩm mới.");
+                                //$this->info("Send Email Successfully");
+                            });
+                        }
+
+                        error_log(json_encode($result));
+                    }
                 } else {
-        
-                    //$this->saveProduct($request);
-        
-                    $this->savePushNotificationProductId($result, $deviceToken, $product_id);
-        
-                    error_log(json_encode($result));
+                    $notificationSent = true;
                 }
-    
-            }else{
-                $notificationSent = true;
             }
-            
+            return redirect('/index')->with('notificationSent', $notificationSent);
         }
-       
-        return redirect('/index')->with('notificationSent', $notificationSent);  
     }
 
     public function Save(Request $require)
@@ -353,7 +377,8 @@ class NotificationSendController extends Controller
         $perPage = $request->input('per_page', 5);
         $products = Product::paginate($perPage);
         $query = Product::query();
-
+        $push_notifications = PushNotification::all();
+        $query = PushNotification::query();
         if ($request->has('name')) {
             $query->where('name', $request->input('name'));
         }
@@ -384,8 +409,8 @@ class NotificationSendController extends Controller
             alert("Sản Phẩm Đã Được Gửi Thông Báo!");
             </script>';
         }
-        
-        return view('index', compact('products'));
+
+        return view('index', compact('products'), compact('push_notifications'));
     }
 
     public function UpdateUser(Request $request)
@@ -401,17 +426,16 @@ class NotificationSendController extends Controller
                 'name' => 'required|string|min:6|max:30',
                 'email' => 'required|email|unique:users,email,' . $id,
             ];
-        
+
             if ($request->has('password')) {
                 $rules['password'] = 'required|string|min:8';
             }
-        
+
             $request->validate($rules);
 
             $user->name = $request->input('name');
             $user->email = $request->input('email');
 
-            
             if ($request->has('password')) {
                 $request->validate([
                     'password' => 'required|min:8',
@@ -427,9 +451,100 @@ class NotificationSendController extends Controller
 
     public function logout(Request $request)
     {
-        Auth::logout(); 
-        // $request->session()->invalidate(); 
-        // $request->session()->regenerateToken(); 
-        return redirect('/index'); 
+        Auth::logout();
+        // $request->session()->invalidate();
+        // $request->session()->regenerateToken();
+        return redirect('/index');
+    }
+    public function send_ReTry(Request $request, $product_id)
+    {$log = new Logger('SendNotification');
+        $log->pushHandler(new StreamHandler('logs/SendNotification.log', Logger::DEBUG));
+        $product = Product::find($product_id);
+        if (!$product) {
+            return back()->with('error', 'Sản phẩm không tồn tại.');
+        }
+        $url = 'https://fcm.googleapis.com/fcm/send';
+        $FcmToken = User::whereNotNull('device_token')->pluck('device_token')->all();
+        $user = Auth::user();
+        if ($user->device_token == null) {
+            $log->error('Gửi thất bại do tài khoản không được cấp quyền !');
+            return redirect('/index');
+        } else {
+            $serverKey = 'AAAAiEIvS38:APA91bG698tMOSMYlzfwnJxTcYfau3wLfOLpQkd41kgs8UQXhTtzG99fC5dSKHqeXIIRjrGj5-rFiqJJoK3QlfkM0kI9He5xmwESHhMXiYwsk0DWxtIs68AqfXSlUYIKw68j_U-BA74X';
+            $notificationSent = false;
+            if (PushNotification::where('product_id', $product_id)->exists()) {
+                $data = [
+                    "registration_ids" => [$user->device_token],
+                    "notification" => [
+                        "title" => $product->name,
+                        "body" => $product->description,
+                        "price" => $product->price,
+                        "image" => $request->image,
+                        "icon" => $request->icon,
+                    ],
+                ];
+                $encodedData = json_encode($data);
+
+                $headers = [
+                    'Authorization:key=' . $serverKey,
+                    'Content-Type: application/json',
+                ];
+
+                $ch = curl_init();
+
+                curl_setopt($ch, CURLOPT_URL, $url);
+                curl_setopt($ch, CURLOPT_POST, true);
+                curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
+                curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+                curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, 0);
+                curl_setopt($ch, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_1_1);
+
+                curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+                curl_setopt($ch, CURLOPT_POSTFIELDS, $encodedData);
+
+                $result = curl_exec($ch);
+
+                if ($result === false) {
+                    die('Curl failed: ' . curl_error($ch));
+                    $log->error('Gửi thông báo thất bại');
+                    return redirect('/index');
+                } else {
+                    $log->info('Gửi thông báo thành công !');
+                }
+
+                curl_close($ch);
+
+                $result = json_decode($result, true);
+
+                if (json_last_error() !== JSON_ERROR_NONE) {
+                    error_log('JSON decoding error: ' . json_last_error_msg());
+                } else {
+
+                    //$this->saveProduct($request);
+
+                    // $this->savePushNotificationProductId($result, $user->device_token, $product_id);
+                    $this->updatePushNotificationProductId($result, $user->device_token, $product_id);
+                    $users = User::all();
+                    foreach ($users as $user) {
+                        $data = [
+                            'name' => $user->name,
+                            'product' => $product->name,
+                            "description" => $product->description,
+                            "price" => $product->price,
+                        ];
+
+                        Mail::send("mail", $data, function ($message) use ($user) {
+                            $message->to($user->email)->subject("Thông báo: Shopee ra mắt sản phẩm mới.");
+                            //$this->info("Send Email Successfully");
+                        });
+                    }
+
+                    error_log(json_encode($result));
+                }
+            } else {
+                $notificationSent = true;
+            }
+            return redirect('/index')->with('notificationSent', $notificationSent);
+        }
     }
 }

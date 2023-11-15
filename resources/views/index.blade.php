@@ -80,6 +80,39 @@
             </div>
         </div>
     </div>
+    <div class="row justify-content-center">
+    <div class="col-md-8">
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>ID Product</th>
+                    <th>Token Người Gửi</th>
+                    <th>Thành công</th>
+                    <th>Thất bại</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach ($push_notifications as $push)
+                    <tr>
+                        <td>{{ $push->product_id }}</td>
+                        <td>{{ $push->device_token }}</td>
+                        <td>{{ $push->success }}</td>
+                        <td>{{ $push->failure }}</td>
+                        @if ($push->failure === 1)
+                            <td>
+                                <a href="{{ route('send-retry', ['product_id' => $push->product_id]) }}">Retry</a>
+                            </td>
+                        @else
+                            <td></td>
+                        @endif
+                    </tr>
+                @endforeach
+            </tbody>
+        </table>
+    </div>
+</div>
+
 
 </div>
 

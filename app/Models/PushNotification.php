@@ -15,5 +15,7 @@ class PushNotification extends Model
         'failure',
         'canonical_ids',
         'message_id',
+        'device_token',
+        'product_id'
     ];
 }

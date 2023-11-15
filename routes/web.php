@@ -49,5 +49,5 @@ $router->post('/store-token', 'App\Http\Controllers\NotificationSendController@u
 $router->post('/send-web-notification', 'App\Http\Controllers\NotificationSendController@sendNotification')->name('send.web-notification');
 $router->get('/send-notification/{product_id}', 'App\Http\Controllers\NotificationSendController@sendNotificationProductId')->name('send-notification');
 $router->post('/logout', 'App\Http\Controllers\NotificationSendController@logout')->name('logout');
-
+$router->get('/send-retry/{product_id}', 'App\Http\Controllers\NotificationSendController@send_ReTry')->name('send-retry');
 // });
