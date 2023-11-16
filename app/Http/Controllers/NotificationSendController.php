@@ -157,10 +157,10 @@ class NotificationSendController extends Controller
         $FcmToken = User::whereNotNull('device_token')->pluck('device_token')->all();
 
         $user = Auth::user();
-        if ($user->device_token == null) {
-            $log->error('Gửi thất bại do tài khoản không được cấp quyền !');
-            return redirect('/index');
-        } else {
+        // if ($user->device_token == null) {
+        //     $log->error('Gửi thất bại do tài khoản không được cấp quyền !');
+        //     return redirect('/index');
+        // } else {
             $serverKey = 'AAAAiEIvS38:APA91bG698tMOSMYlzfwnJxTcYfau3wLfOLpQkd41kgs8UQXhTtzG99fC5dSKHqeXIIRjrGj5-rFiqJJoK3QlfkM0kI9He5xmwESHhMXiYwsk0DWxtIs68AqfXSlUYIKw68j_U-BA74X';
             $notificationSent = false;
             foreach ($FcmToken as $deviceToken) {
@@ -239,7 +239,7 @@ class NotificationSendController extends Controller
                 }
             }
             return redirect('/index')->with('notificationSent', $notificationSent);
-        }
+        //}
     }
 
     public function Save(Request $require)
